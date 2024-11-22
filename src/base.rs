@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use bitflags::bitflags;
+use libevent_sys::timeval;
 use std::io;
 use std::os::raw::{c_int, c_short, c_void};
 use std::ptr::NonNull;
@@ -123,6 +124,50 @@ impl Base {
     /// running event loop to resume searching for active events.
     pub fn loopcontinue(&self) -> i32 {
         unsafe { libevent_sys::event_base_loopcontinue(self.as_raw().as_ptr()) as i32 }
+    }
+
+    pub fn once(&mut self,
+        fd: Option<EvutilSocket>,
+        flags: EventFlags,
+        callback: EventCallbackFn,
+        callback_ctx: Option<EventCallbackCtx>,
+        timeout: Option<Duration>
+    ) -> io::Result<()> {
+        let fd = if let Some(fd) = fd {
+            fd
+        } else {
+            -1
+        };
+        let callback_ctx = if let Some(ctx) = callback_ctx {
+            ctx
+        } else {
+            std::ptr::null::<c_void>() as *mut std::ffi::c_void
+        };
+        let tv: *const timeval;
+        if let Some(timeout) = timeout {
+            tv = &to_timeval(timeout);
+        } else {
+            tv = std::ptr::null();
+        }
+        let exitcode = unsafe {
+            libevent_sys::event_base_once(
+                self.as_raw().as_ptr(),
+                fd,
+                flags.bits() as c_short,
+                Some(callback),
+                callback_ctx,
+                tv)
+        };
+        match exitcode {
+            -1 => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Failed event_base_once",
+                ));
+            }
+            _ => (),
+        }
+        Ok(())
     }
 
     /// Wrapper for libevent's `event_new`, which allocates and initializes a
